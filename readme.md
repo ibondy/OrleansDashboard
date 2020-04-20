@@ -1,6 +1,7 @@
 # Orleans Dashboard
 
-[![Build status](https://ci.appveyor.com/api/projects/status/ukphl1c0s9cuf4jl?svg=true)](https://ci.appveyor.com/project/richorama/orleansdashboard)
+![](https://github.com/OrleansContrib/OrleansDashboard/workflows/Node%20CI/badge.svg?branch=master) ![](https://github.com/OrleansContrib/OrleansDashboard/workflows/.NET%20Core/badge.svg?branch=master)
+![Nuget](https://img.shields.io/nuget/v/OrleansDashboard)
 
 An admin dashboard for Microsoft Orleans.
 
@@ -24,8 +25,35 @@ new SiloHostBuilder()
 
 Start the silo, and open this url in your browser: [`http://localhost:8080`](http://localhost:8080)
 
-Please note, the CPU and Memory metrics are only enabled on Windows when you add the [Microsoft.Orleans.OrleansTelemetryConsumers.Counters](https://www.nuget.org/packages/Microsoft.Orleans.OrleansTelemetryConsumers.Counters/) package (not supported for .Net Core now).
+Please note, the dashboard registers its services and grains using `ConfigureApplicationParts` which disables the
+automatic discovery of grains in Orleans. To enable automatic discovery of the grains of the original project, change
+the configuration to:
+
+```c#
+new SiloHostBuilder()
+  .ConfigureApplicationParts(parts => parts.AddFromApplicationBaseDirectory())
+  .UseDashboard(options => { })
+  .Build();
+```
+
+### CPU and Memory Metrics on Windows
+
+The CPU and Memory metrics are only enabled on Windows when you add the [Microsoft.Orleans.OrleansTelemetryConsumers.Counters](https://www.nuget.org/packages/Microsoft.Orleans.OrleansTelemetryConsumers.Counters/) package and have registered an implementation of  `IHostEnvironmentStatistics` such as with `builder.UsePerfCounterEnvironmentStatistics()` (currently Windows only).
 You also have to wait some time before you see the data.
+
+### CPU and Memory Metrics on Linux
+
+Since version 2.3, Orleans includes an implementation of `IHostEnvironmentStatistics` for Linux in
+[Microsoft.Orleans.OrleansTelemetryConsumers.Linux](https://www.nuget.org/packages/Microsoft.Orleans.OrleansTelemetryConsumers.Linux/).
+To enable CPU and Memory metrics, install the NuGet package and add the implementation to the silo using
+`siloBuilder.UseLinuxEnvironmentStatistics()`.
+
+### CPU and Memory Metrics on AWS ECS
+
+A community-maintained implementation of `IHostEnvironmentStatistics` for AWS ECS is available in
+[Orleans.TelemetryConsumers.ECS](https://www.nuget.org/packages/Orleans.TelemetryConsumers.ECS/).
+To enable CPU and Memory metrics, install the NuGet package and add the implementation to the silo using
+`siloBuilder.UseEcsTaskHostEnvironmentStatistics()`.
 
 ## Configuring the Dashboard
 
@@ -40,7 +68,7 @@ The dashboard supports the following properties for the configuration:
 
 ```c#
 new SiloHostBuilder()
-  .UseDashboard(options => { 
+  .UseDashboard(options => {
     options.Username = "USERNAME";
     options.Password = "PASSWORD";
     options.Host = "*";
@@ -68,7 +96,7 @@ This is only required if you want to modify the user interface.
 The user interface is react.js, using browserify to compose the javascript delivered to the browser.
 The HTML and JS files are embedded resources within the dashboard DLL.
 
-To build the UI, you must have [node.js](https://nodejs.org/en/) and npm installed. 
+To build the UI, you must have [node.js](https://nodejs.org/en/) and npm installed.
 
 To build `index.min.js`, which contains the UI components and dependencies, install the dependencies and run the build script using npm:
 
@@ -81,6 +109,12 @@ $ npm run build
 This will copy the bundled, minified javascript file into the correct place for it to be picked up as an embedded resource in the .NET OrleansDashboard project.
 
 You will need to rebuild the OrleansDashboard project to see any changes.
+
+## Testing the Dashboard
+
+The `Tests/TestHosts/` directory contains a number of preconfigured test application.
+
+Try the `Tests/TestHosts/TestHost` project as a starting point.
 
 ## Dashboard API
 
@@ -100,7 +134,7 @@ Returns a summary of cluster metrics. Number of active hosts (and a history), nu
   "totalActiveHostCountHistory": [ ... ],
   "hosts": [ ... ],
   "simpleGrainStats": [ ... ],
-  "totalActivationCount": 32, 
+  "totalActivationCount": 32,
   "totalActivationCountHistory": [ ... ]
 }
 ```

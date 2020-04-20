@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Runtime;
-using OrleansDashboard.Client;
 
 namespace OrleansDashboard
 {
@@ -104,7 +103,10 @@ namespace OrleansDashboard
 
         private static string GetOrleansVersion()
         {
-            return typeof(SiloAddress).GetTypeInfo().Assembly.GetName().Version.ToString();
+            var assembly = typeof(SiloAddress).GetTypeInfo().Assembly;
+            return string.Format("{0} ({1})",
+                assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+                assembly.GetName().Version.ToString());
         }
 
         private static string GetHostVersion()

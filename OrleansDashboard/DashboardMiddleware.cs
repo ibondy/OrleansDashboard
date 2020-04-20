@@ -1,14 +1,13 @@
 ﻿using System;
 using System.IO;
 using System.Reflection;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 using Orleans;
-using OrleansDashboard.Client;
-using OrleansDashboard.Client.Model;
+using OrleansDashboard.Implementation;
+using OrleansDashboard.Model;
 
 // ReSharper disable ConvertIfStatementToSwitchStatement
 
@@ -16,25 +15,31 @@ namespace OrleansDashboard
 {
     public sealed class DashboardMiddleware
     {
-        private static readonly JsonSerializerSettings SerializerSettings = new JsonSerializerSettings
+        private static readonly JsonSerializerOptions Options = new JsonSerializerOptions
         {
-            ContractResolver = new CamelCasePropertyNamesContractResolver()
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
-        const int REMINDER_PAGE_SIZE = 50;
+
+        static DashboardMiddleware()
+        {
+            Options.Converters.Add(new TimeSpanConverter());
+        }
+
+        private const int REMINDER_PAGE_SIZE = 50;
         private readonly IOptions<DashboardOptions> options;
         private readonly DashboardLogger logger;
         private readonly RequestDelegate next;
         private readonly IDashboardClient client;
 
-        public DashboardMiddleware(RequestDelegate next, 
-            IGrainFactory grainFactory, 
+        public DashboardMiddleware(RequestDelegate next,
+            IGrainFactory grainFactory,
             IOptions<DashboardOptions> options,
             DashboardLogger logger)
         {
             this.options = options;
             this.logger = logger;
             this.next = next;
-            this.client = new DashboardClient(grainFactory);
+            client = new DashboardClient(grainFactory);
         }
 
         public async Task Invoke(HttpContext context)
@@ -78,6 +83,7 @@ namespace OrleansDashboard
             if (request.Path == "/ClusterStats")
             {
                 var result = await client.ClusterStats();
+
                 await WriteJson(context, result.Value);
 
                 return;
@@ -181,14 +187,15 @@ namespace OrleansDashboard
             await next(context);
         }
 
-        private static async Task WriteJson(HttpContext context, object content)
+        private static async Task WriteJson<T>(HttpContext context, T content)
         {
             context.Response.StatusCode = 200;
             context.Response.ContentType = "text/json";
 
-            var json = JsonConvert.SerializeObject(content, Formatting.Indented, SerializerSettings);
-
-            await context.Response.WriteAsync(json);
+            await using (var writer = new Utf8JsonWriter(context.Response.BodyWriter))
+            {
+                JsonSerializer.Serialize(writer, content, Options);
+            }
         }
 
         private static async Task WriteFileAsync(HttpContext context, string name, string contentType)
@@ -219,11 +226,13 @@ namespace OrleansDashboard
             {
                 var content = new StreamReader(stream).ReadToEnd();
 
-                var basePath = context.Request.PathBase;
+                var basePath = string.IsNullOrWhiteSpace(options.Value.ScriptPath)
+                    ? context.Request.PathBase.ToString()
+                    : options.Value.ScriptPath;
 
                 if (basePath != "/")
                 {
-                    basePath = basePath + "/";
+                    basePath += "/";
                 }
 
                 content = content.Replace("{{BASE}}", basePath);
@@ -243,9 +252,11 @@ namespace OrleansDashboard
 
             var token = context.RequestAborted;
 
-            using (var writer = new TraceWriter(logger, context))
+            try
             {
-                await writer.WriteAsync(@"
+                using (var writer = new TraceWriter(logger, context))
+                {
+                    await writer.WriteAsync(@"
    ____       _                        _____            _     _                         _
   / __ \     | |                      |  __ \          | |   | |                       | |
  | |  | |_ __| | ___  __ _ _ __  ___  | |  | | __ _ ___| |__ | |__   ___   __ _ _ __ __| |
@@ -256,8 +267,13 @@ namespace OrleansDashboard
 You are connected to the Orleans Dashboard log streaming service
 ").ConfigureAwait(false);
 
-                await Task.Delay(TimeSpan.FromMinutes(60), token).ConfigureAwait(false);
-                await writer.WriteAsync("Disconnecting after 60 minutes\r\n").ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMinutes(60), token).ConfigureAwait(false);
+
+                    await writer.WriteAsync("Disconnecting after 60 minutes\r\n").ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
             }
         }
 
@@ -265,8 +281,8 @@ You are connected to the Orleans Dashboard log streaming service
         {
             var file = new FileInfo(name);
 
-            return file.Exists 
-                ? file.OpenRead() 
+            return file.Exists
+                ? file.OpenRead()
                 : assembly.GetManifestResourceStream($"OrleansDashboard.{name}");
         }
     }
